@@ -144,6 +144,6 @@ No secrets are ever required in, or exposed to, the frontend — all LLM calls h
 
 ---
 
-## Author
+## Authors
 
-**Kamesh** — designed and built Finora end-to-end, including the backend (FastAPI, SQLite, authentication), the AI assistant, credit alerts, transaction PIN, face verification, and voice payment features described above.
+**Kamesh, Suman Hait, Muthazir, Dinesha** — designed and built Finora end-to-end, including the backend (FastAPI, SQLite, authentication), the AI assistant, credit alerts, transaction PIN, face verification, and voice payment features described above.
