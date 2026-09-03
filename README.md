@@ -1,6 +1,6 @@
 # Finora — AI-Powered Finance & Payments Platform
 
-Finora is a full-stack fintech web app: a wallet, credit card, and payments platform with a real LLM-powered financial assistant, voice-driven payments, and biometric-style transaction security. It started as a hackathon project (Prompt-a-thon 2025, VIT Chennai) and has since been rebuilt with a real backend, database, and AI layer.
+Finora is a full-stack fintech web app: a wallet, credit card, and payments platform with a real LLM-powered financial assistant, voice-driven payments, and biometric-style transaction security. It started as a hackathon project (Impedance 2026, VIT Chennai) and has since been rebuilt with a real backend, database, and AI layer.
 
 ---
 
