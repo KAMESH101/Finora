@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -9,8 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { motion } from "motion/react";
 import { mockData } from "../mockData";
-import { User, Bell, Shield, Globe, Moon, Sun, Lock, Mail, Phone, MapPin, CreditCard } from "lucide-react";
+import { User, Bell, Shield, Globe, Moon, Sun, Lock, Mail, Phone, MapPin, CreditCard, ScanFace, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner@2.0.3";
+import { setupPin } from "../utils/pinAPI";
+import { enrollFace, getFaceStatus, removeFaceEnrollment } from "../utils/faceAPI";
 
 interface SettingsProps {
   theme: string;
@@ -27,6 +29,61 @@ export function Settings({ theme, onThemeChange }: SettingsProps) {
   });
   const [biometric, setBiometric] = useState(true);
   const [showPinModal, setShowPinModal] = useState(false);
+  const [pinDigits, setPinDigits] = useState(['', '', '', '']);
+  const [pinSaving, setPinSaving] = useState(false);
+  const [faceEnrolled, setFaceEnrolled] = useState<boolean | null>(null);
+  const [faceConsent, setFaceConsent] = useState(false);
+  const [faceSaving, setFaceSaving] = useState(false);
+
+  useEffect(() => {
+    getFaceStatus().then((r) => setFaceEnrolled(r.enrolled)).catch(() => setFaceEnrolled(false));
+  }, []);
+
+  const handleSetupPin = async () => {
+    const pin = pinDigits.join('');
+    if (pin.length !== 4) {
+      toast.error('Enter all 4 digits');
+      return;
+    }
+    setPinSaving(true);
+    try {
+      await setupPin(pin, pin);
+      toast.success('Transaction PIN set successfully!');
+      setShowPinModal(false);
+      setPinDigits(['', '', '', '']);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not set PIN');
+    } finally {
+      setPinSaving(false);
+    }
+  };
+
+  const handleEnrollFace = async () => {
+    if (!faceConsent) {
+      toast.error('Please provide consent to enable face verification');
+      return;
+    }
+    setFaceSaving(true);
+    try {
+      await enrollFace(true);
+      setFaceEnrolled(true);
+      toast.success('Face verification enrolled!');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not enroll face verification');
+    } finally {
+      setFaceSaving(false);
+    }
+  };
+
+  const handleRemoveFace = async () => {
+    try {
+      await removeFaceEnrollment();
+      setFaceEnrolled(false);
+      toast.success('Face verification removed');
+    } catch (e) {
+      toast.error('Could not remove face verification');
+    }
+  };
 
   const handleSave = () => {
     toast.success("✅ Settings updated successfully!");
@@ -299,47 +356,88 @@ export function Settings({ theme, onThemeChange }: SettingsProps) {
                 <div className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <h4>PIN Lock</h4>
-                      <p className="text-sm text-muted-foreground">Secure your app with a 4-digit PIN</p>
+                      <h4>Transaction PIN</h4>
+                      <p className="text-sm text-muted-foreground">Required to authorize wallet/voice payments</p>
                     </div>
                   </div>
                   <Dialog open={showPinModal} onOpenChange={setShowPinModal}>
                     <DialogTrigger asChild>
                       <Button variant="outline" size="sm" className="btn-ripple">
                         <Lock className="w-4 h-4 mr-2" />
-                        Change PIN
+                        Set / Change PIN
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Change PIN</DialogTitle>
+                        <DialogTitle>Set Transaction PIN</DialogTitle>
                         <DialogDescription>
-                          Enter a new 4-digit PIN for your account
+                          Choose a 4-digit PIN used to authorize payments. It's stored securely hashed — never in plain text.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <div className="flex gap-2 justify-center">
-                          {[1, 2, 3, 4].map((i) => (
+                          {[0, 1, 2, 3].map((i) => (
                             <Input
                               key={i}
                               type="password"
+                              inputMode="numeric"
                               maxLength={1}
+                              value={pinDigits[i]}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/\D/g, '').slice(0, 1);
+                                const next = [...pinDigits];
+                                next[i] = v;
+                                setPinDigits(next);
+                                if (v && i < 3) {
+                                  const el = document.getElementById(`pin-box-${i + 1}`);
+                                  el?.focus();
+                                }
+                              }}
+                              id={`pin-box-${i}`}
                               className="w-16 h-16 text-center text-2xl"
                             />
                           ))}
                         </div>
-                        <Button
-                          className="w-full "
-                          onClick={() => {
-                            toast.success("PIN changed successfully!");
-                            setShowPinModal(false);
-                          }}
-                        >
+                        <Button className="w-full" onClick={handleSetupPin} loading={pinSaving}>
                           Confirm PIN
                         </Button>
                       </div>
                     </DialogContent>
                   </Dialog>
+                </div>
+
+                <div className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ScanFace className="w-5 h-5" />
+                    <h4>Face Verification</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Required before voice payments can be made. Consent-based — you can remove this at any time.
+                  </p>
+                  {faceEnrolled === true ? (
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--money-in)' }}>
+                        <CheckCircle2 className="w-4 h-4" /> Enrolled
+                      </span>
+                      <Button variant="outline" size="sm" onClick={handleRemoveFace}>
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={faceConsent}
+                          onChange={(e) => setFaceConsent(e.target.checked)}
+                        />
+                        I consent to enabling face verification for voice payments
+                      </label>
+                      <Button size="sm" onClick={handleEnrollFace} loading={faceSaving} disabled={!faceConsent}>
+                        Enroll Face Verification
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">

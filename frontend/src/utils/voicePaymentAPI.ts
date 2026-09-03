@@ -25,6 +25,7 @@ export async function payViaVoice(params: {
   contact_id: number;
   amount: number;
   pin: string;
+  face_token: string | null;
 }): Promise<PayResult> {
   return authFetch('/api/wallet/pay', {
     method: 'POST',

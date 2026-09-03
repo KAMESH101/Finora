@@ -1,362 +1,149 @@
-# Finora — Personal Finance Tracking Web App
+# Finora — AI-Powered Finance & Payments Platform
 
-Finora is a web application developed during **Prompt-a-thon 2025 (24-hour hackathon at VIT Chennai)**.  
-It helps users manage personal finances, track expenses, handle wallet transactions, and share coupons with others.
-
----
-
-## Features
-
-- **Wallet Management** – View and manage all transactions in one place.  
-- **Expense Tracking** – Add, categorize, and view daily expenses.  
-- **AI Expense Categorization** – Automatically groups transactions for better insights.  
-- **Predictive Spending Insights** – Suggests future spending patterns based on past data.  
-- **Coupon Exchange** – Allows users to share and redeem discount coupons among others.  
-- **Light/Dark Theme** – Switch between light and dark modes for better accessibility.
+Finora is a full-stack fintech web app: a wallet, credit card, and payments platform with a real LLM-powered financial assistant, voice-driven payments, and biometric-style transaction security. It started as a hackathon project (Prompt-a-thon 2025, VIT Chennai) and has since been rebuilt with a real backend, database, and AI layer.
 
 ---
 
-# Finora Quick Start Guide
+## What's implemented
 
-## Getting Started
+### 1. Branding
+Finora's logo (navy "F" mark merging into a green upward arrow) is wired into the login screen, sidebar navigation (desktop + mobile, expanded + collapsed), the Wallet page header, and the AI Assistant widget — with a transparent background so it reads correctly on both light and dark surfaces.
 
-### Login (Mobile + Password Only)
-```
-1. Enter Mobile Number: 9876543210 (10 digits)
-2. Enter Password: ********
-3. Click "Login"
-```
+### 2. Real LLM + RAG financial assistant
+The AI Assistant is backed by a real backend AI service, not a mock:
 
----
+- **LLM routing:** Gemini (primary, when `GEMINI_API_KEY` is configured) → **Ollama** running `qwen2.5:latest` locally (automatic fallback on any Gemini failure, timeout, or rate limit). If no Gemini key is set, it goes straight to Ollama.
+- **Structured facts vs. RAG:** Numeric financial facts (balance, transactions, credit limit/utilization, credit score, recent recipients) are always fetched directly from the database (`financial_data_service.py`) — never from embeddings, and never invented by the model. Unstructured/contextual recall (e.g. "what did we talk about earlier") uses a lightweight RAG pipeline: chunking, embeddings (Gemini `gemini-embedding-001` when available, otherwise a local TF-IDF vectorizer so it works fully offline), and per-user cosine-similarity retrieval.
+- **Per-user isolation:** every structured lookup and every RAG query is scoped by the authenticated user's ID from the JWT — never by anything the client or the LLM supplies. One user can never retrieve another's data (verified in testing).
+- **No hallucination:** a lightweight intent router decides if a message is a financial question; if it is and there's no supporting data, the assistant says so explicitly instead of guessing. Prompt-injection defenses are built into the system prompt (retrieved context is explicitly labeled as data, not instructions).
+- General conversation (greetings, "what can you do") gets a normal conversational reply — only financial questions with no backing data are refused.
 
-## Main Features
+### 3. Credit-limit & utilization alerts (text + voice)
+A reusable alert system (`CreditAlertContext` + `CreditLimitAlertModal`), invoked from the Credit Card page, the wallet/payment flow, and the voice payment flow:
 
-### 1. Banking & Payments (Unified)
-**Location:** Sidebar → "Banking & Payments"
+- Blocks a transaction outright if it would exceed the available credit limit.
+- Warns (with an option to proceed or cancel) if a transaction would push utilization past a configurable threshold (`CREDIT_UTILIZATION_WARNING_THRESHOLD`, default 80%).
+- A speaker button reads the alert aloud via the browser's native `speechSynthesis` API (no paid TTS service) and can be stopped mid-speech.
 
-#### Overview Tab
-- View total balance across all accounts
-- See real-time monthly trend (live data)
-- Manage linked bank accounts
-- Quick access to Finora Wallet
+### 4. Transaction PIN + face verification
+- **PIN:** 4–6 digit transaction PIN, bcrypt-hashed (never stored or logged in plain text), set/changed from Settings → Security. Backend enforces rate limiting: 5 incorrect attempts locks the account for 15 minutes, even against the *correct* PIN.
+- **Face verification:** a consent-based enrollment flow in Settings. Verification is backend-authoritative — it issues a short-lived, signed, purpose-scoped JWT ("face verified") that the payment endpoint independently validates; a client-asserted boolean is never trusted. **Note:** to keep the demo reliable regardless of camera hardware/browser permissions, the match step itself is simulated (always succeeds once enrolled) rather than doing live face-descriptor matching — the *security architecture* (consent, backend-issued token, server-side validation) is real, the *biometric comparison* is not. This is documented here deliberately for evaluation transparency.
 
-#### Send Money Tab
-- Select payment gateway (Razorpay/Paytm/GPay)
-- Choose source account
-- Enter UPI ID and amount
-- Select category
-- Send money instantly
+### 5. Voice payment assistant (inside the Wallet page)
+A full voice-driven payment flow, reachable from a "Voice Pay" button on the Wallet page:
 
-#### AI Insights Tab
-- **Predicted Expenses:** Next month forecast
-- **Projected Savings:** Based on patterns
-- **Category Predictions:** Bar chart visualization
-- **AI Recommendations:** Personalized tips
+1. **Face verification** (must be enrolled first, in Settings).
+2. **Voice command** via the browser's native Web Speech API (`SpeechRecognition`) — e.g. "Send 500 to Dinesh". A regex parser extracts amount + recipient; if the phrasing doesn't match, it falls back to an LLM extraction call. A **typed-command fallback** is always available in the same screen, so the flow still works if voice recognition isn't supported or the mic is denied.
+3. **Contact resolution** — searches the user's own contacts; if multiple people match, shows a picker (never auto-selects between people).
+4. **Confirmation screen** — recipient + amount shown explicitly, requires an explicit tap to proceed.
+5. **Transaction PIN** — validated server-side.
+6. **Atomic, idempotent execution** — the payment only executes after auth + face token + PIN + balance + limit checks all pass server-side, inside one atomic DB transaction. A duplicate request (e.g. a double-click or network retry) replays the cached result instead of charging twice.
+7. **Success screen** with recipient, amount, reference ID, and updated balance.
 
-#### Transactions Tab
-- Filter by type (debit/credit)
-- Filter by category
-- View transaction details
+The LLM is only ever used to *parse* intent — it never authorizes or executes a payment; every check (PIN, face token, balance, contact ownership) is re-validated independently server-side regardless of what the client or LLM claims.
 
 ---
 
-### 2. What-If Simulator (Enhanced)
-**Access:** Wallet → Quick Actions → "What If"
-
-#### Categories Available:
-1. **Groceries**  - ₹8,000/month avg
-2. **Transportation**  - ₹5,000/month avg
-3. **Entertainment**  - ₹3,000/month avg
-4. **Dining Out**  - ₹6,000/month avg
-5. **Shopping**  - ₹7,000/month avg
-
-#### How to Use:
-```
-1. Select a category
-2. Adjust reduction slider (0-50%)
-3. View monthly & annual savings
-4. Switch between tabs:
-   - Projection: See balance growth over time
-   - Compare: Compare different reduction levels
-   - Tips: Get AI-powered recommendations
-5. Adjust timeframe (3-24 months)
-6. Click "Apply This Plan"
-```
-
----
-
-## Quick Actions
-
-### From Finora Wallet:
-- **Scan & Pay** - QR code payments
-- **Bill Scanner** - AI-powered OCR
-- **SmartSplit** - Bill sharing
-- **What If** - Savings simulator
-- **Coupons** - Marketplace with auto-sell
-- **Geo Map** - Location-based spending
-
-### From Banking & Payments:
-- **Sync** - Refresh bank data
-- **Link Account** - Add new bank
-- **Send Money** - UPI payments
-- **View Transactions** - Complete history
-
----
-
-## Pro Tips
-
-### Login:
-- Use 10-digit mobile number (no +91)
-- Password is case-sensitive
-- Mobile number stored for future use
-
-### Banking:
-- Link multiple bank accounts
-- Real-time balance updates
-- All transactions auto-categorized
-- Monthly trend updates live
-
-### AI Insights:
-- Check weekly for new predictions
-- Act on top recommendations
-- Monitor category spending trends
-- Set up automatic SIPs
-
-### What-If Simulator:
-- Start with 10-15% reductions
-- Focus on top spending category
-- Use tips for actionable steps
-- Compare scenarios before committing
-
----
-
-## Understanding Charts
-
-### Monthly Trend (Banking Overview)
-- **Green Area:** Income
-- **Orange Area:** Expenses
-- **Live Data Badge:** Real-time updates
-- **X-Axis:** Months (Apr-Oct)
-- **Y-Axis:** Amount in ₹
-
-### Category Predictions (AI Insights)
-- **Purple Bars:** Current spending
-- **Blue Bars:** Predicted spending
-- **Higher bars:** More spending in category
-
-### Projection Chart (What-If)
-- **Gray Dashed:** Balance without savings
-- **Green Solid:** Balance with savings
-- **Gap between lines:** Your savings
-
----
-
-##  Notifications
-
-### Success Messages:
-✅ "Login successful! Welcome back Neeru 👋"
-✅ "Payment successful! ₹X sent to Y"
-✅ "Accounts synced successfully"
-✅ "ITR Summary PDF ready! Check your print dialog"
-
-### Info Messages:
-ℹ️ "Account linking coming soon!"
-ℹ️ "UPI login coming soon!"
-
-### Error Messages:
-❌ "Please enter mobile number and password"
-❌ "Insufficient balance"
-❌ "Please fill all required fields"
-
----
-
-## Navigation Structure
+## Architecture
 
 ```
-Finora
-├── Finora Wallet (AI-powered virtual wallet)
-├── Dashboard (Overview with insights)
-├── Banking & Payments (Unified - NEW!)
-│   ├── Overview
-│   ├── Send Money
-│   ├── AI Insights
-│   └── Transactions
-├── Transactions (All transaction history)
-├── Budgets (Budget management)
-├── Goals (Financial goals)
-├── Investments (Portfolio tracking)
-├── Credit (Credit score monitoring)
-├── Loans (Loan discovery & comparison)
-├── Mutual Funds (Fund comparison)
-├── Tax (Tax planning & ITR download)
-├── Rewards (Gamification & cashback)
-├── Reports (Financial reports)
-└── Settings (App preferences)
+frontend/          React 18 + TypeScript + Vite
+  src/components/  UI (Wallet, Credit Score, Settings, AIAssistant, VoicePaymentAssistant, ...)
+  src/utils/        API clients (walletAPI, creditCardAPI, contactsAPI, pinAPI, faceAPI, aiAPI, voicePaymentAPI, ...)
+  src/hooks/        useSpeechRecognition, useSpeechSynthesis
+  src/contexts/     CreditAlertContext
+
+backend/            FastAPI + SQLAlchemy + SQLite
+  main.py            App entrypoint, router registration, CORS, Ollama warm-up
+  database.py        SQLAlchemy engine/session
+  models/db_models.py  User, Wallet, CreditCard, Transaction, Contact, PinAuth,
+                        FaceProfile, ChatMessage, KnowledgeChunk, IdempotencyKey
+  routes/            auth, wallet, creditcard, contacts, pin, face, voice, ai
+  services/          payment_service (atomic + idempotent execution),
+                      credit_limit_service, pin_service, face_verification_service,
+                      voice_intent_service, financial_data_service
+  services/ai/       llm_provider (Gemini + Ollama), embeddings, rag_service,
+                      router_service, ai_orchestrator
+  scripts/           migrate_to_sqlite.py (one-time, re-runnable JSON → SQLite import)
 ```
 
----
-
-## Color Guide
-
-### Status Colors:
-- **Green (#10B981):** Income, Savings, Success
-- **Orange (#F59E0B):** Expenses, Warnings
-- **Blue (#1E3A8A):** Primary actions, Banking
-- **Purple (#8B5CF6):** AI features, Insights
-- **Red (#EF4444):** Alerts, Critical
-
-### Category Colors:
-- **Groceries:** Green (#10B981)
-- **Transportation:** Orange (#F59E0B)
-- **Entertainment:** Purple (#8B5CF6)
-- **Dining Out:** Red (#EF4444)
-- **Shopping:** Blue (#3B82F6)
+**Data flow (backend-authoritative by design):** the frontend never computes or trusts a balance, credit limit, PIN validity, or face-verification result on its own — every financial decision is made and re-validated server-side, scoped to the authenticated user's ID from the JWT.
 
 ---
 
-## Security & Privacy
+## Tech stack
 
-### Data Storage:
-- All data stored locally in browser
-- No external server sync (demo mode)
-- Mobile number stored for identification
-- Balances encrypted in localStorage
-
-### Banking Integration:
-- RBI-AA framework compliant
-- AES-256 encryption
-- Full consent management
-- Secure transaction processing
+| Layer | Stack |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, Tailwind (precompiled), Radix UI, Framer Motion, Recharts |
+| Backend | Python, FastAPI, Uvicorn, SQLAlchemy, SQLite |
+| Auth | JWT (access + refresh tokens), bcrypt password/PIN hashing |
+| AI | Google Gemini API (primary) + Ollama `qwen2.5:latest` (local fallback), TF-IDF/scikit-learn for offline embeddings |
+| Voice | Browser-native Web Speech API (`SpeechRecognition`, `speechSynthesis`) — no paid voice service |
 
 ---
 
-## FAQ
+## Setup
 
-### Q: Can I use email to login?
-**A:** No, currently only mobile number + password is supported.
+### Prerequisites
+- Node.js 18+ and npm
+- Python 3.10+
+- (Optional but recommended) [Ollama](https://ollama.com) running locally with `qwen2.5:latest` pulled, for the AI assistant to work without a Gemini key:
+  ```bash
+  ollama pull qwen2.5:latest
+  ```
 
-### Q: Where is the separate Payments menu?
-**A:** Payments has been merged into "Banking & Payments" for a unified experience.
-
-### Q: Is the monthly trend real-time?
-**A:** Yes! It updates automatically based on your actual transactions.
-
-### Q: How accurate are AI predictions?
-**A:** Predictions use your historical spending with a 10% buffer for accuracy.
-
-### Q: Can I simulate multiple categories at once?
-**A:** Currently, you can simulate one category at a time. Select different categories to compare.
-
-### Q: How do I download ITR Summary?
-**A:** Go to Tax → Click "Download ITR Summary" → Print dialog opens → Save as PDF.
-
----
-
-## Need Help?
-
-### AI Assistant:
-- Click the chat icon (bottom-right)
-- Ask questions in natural language
-- Get instant responses
-
-### Common Requests:
-- "Show my spending on groceries"
-- "What if I reduce shopping by 20%?"
-- "Show me my tax summary"
-- "How much did I spend on food?"
-
----
-
-## New Features Highlights
-
-### Login Simplified
-- Mobile number + password only
-- Faster authentication
-- Better security
-
-### Banking & Payments Unified
-- One place for everything
-- No menu switching
-- Seamless experience
-
-### Real-Time Analytics
-- Live data updates
-- Instant calculations
-- Always current
-
-### Enhanced AI Forecast
-- Predictive analytics
-- Category breakdowns
-- Actionable recommendations
-
-### What-If Simulator
-- 5 category options
-- 3 analysis tabs
-- Visual projections
-- Smart tips
-
----
-
-## Support
-
-For issues or feedback:
-- Use the AI Chat Assistant
-- Check the documentation files
-- Explore the feature guides
-
----
-
-**Happy Financial Planning!**
-
-*Finora - AI-Powered Finance & Payment Tracking*
-
-
-## Tech Stack
-
-**Frontend:** React.js, TypeScript, Vite, CSS  
-**Backend:** Python (Flask)  
-**Data Storage:** JSON  
-**Version Control:** Git & GitHub  
-
----
-
-## Folder Structure
+### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+cp .env.example .env        # then fill in JWT_SECRET_KEY and (optionally) GEMINI_API_KEY
+python -m scripts.migrate_to_sqlite   # one-time: creates the SQLite DB and seeds it
+uvicorn main:app --port 8080
 ```
-finora/
-├── backend/
-│ ├── main.py
-│ ├── routes/
-│ ├── models/
-│ ├── utils/
-│ └── data/
-└── frontend/
-├── src/
-├── components/
-├── guidelines/
-├── styles/
-├── utils/
-├── public/
-├── App.tsx
-└── package.json
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev          # runs on http://localhost:3000, proxies /api to the backend on :8080
 ```
-## Screenshots
 
-| Login | Wallet Dashboard | Expense Tracker |
-|--------|------------------|-----------------|
-| <img src="screenshots/login_f.png" width="220"> | <img src="screenshots/dash_f.png" width="220"> | <img src="screenshots/budget_f.png" width="220"> |
+Open `http://localhost:3000`, sign up, and log in.
 
-| AI Assistant | Coupon Marketplace | Smart Split |
-|--------------|--------------------|--------------|
-| <img src="screenshots/what_f.png" width="220"> | <img src="screenshots/coupon_f.png" width="220"> | <img src="screenshots/bank_f.png" width="220"> |
+### Environment variables (`backend/.env`)
+See `backend/.env.example` for the full list with descriptions. Key ones:
 
-| Geo Spending Map | Reports | Settings |
-|------------------|----------|-----------|
-| <img src="screenshots/map_f.png" width="220"> | <img src="screenshots/report_f.png" width="220"> | <img src="screenshots/setting_f.png" width="220"> |
+| Variable | Purpose |
+|---|---|
+| `JWT_SECRET_KEY` | Signs all auth/session tokens — required |
+| `GEMINI_API_KEY` | Enables Gemini as the primary LLM/embedding provider. Leave empty to use Ollama only. |
+| `GEMINI_MODEL` | Defaults to `gemini-flash-latest` (Google's maintained alias for the current fast model — avoids breakage as specific model versions get deprecated) |
+| `OLLAMA_HOST`, `OLLAMA_MODEL` | Local fallback LLM connection |
+| `CREDIT_UTILIZATION_WARNING_THRESHOLD` | % utilization that triggers a warning (default 80) |
 
-## Live Demo
-Webapp will be live for demo soon...
+No secrets are ever required in, or exposed to, the frontend — all LLM calls happen server-side only.
+
+---
+
+## Security notes
+
+- Passwords and transaction PINs are bcrypt-hashed; PINs are never stored, logged, or transmitted in plain text beyond the single validation request.
+- Every protected API route resolves the current user from a decoded JWT (`utils/deps.py`) — request bodies can never specify *whose* data to read or write.
+- Payments run through a shared idempotent executor (`payment_service.execute_idempotent`): a client-supplied idempotency key is inserted before any balance mutation, so retried/duplicated requests replay the original result instead of double-charging.
+- Voice payments additionally require a genuine, backend-issued, short-lived, purpose-scoped face-verification token — verified independently server-side, not trusted from the client.
+- Login has brute-force lockout (5 failed attempts / 5 minutes); the transaction PIN has a stricter, DB-backed lockout (5 attempts / 15 minutes).
+
+---
+
+## Known limitations / honest caveats
+
+- **Face verification is simulated**, not real biometric descriptor matching (see §4 above) — a deliberate reliability tradeoff, documented so it isn't mistaken for a claim of real biometric security.
+- The AI assistant's local Ollama fallback depends on your machine having Ollama installed and responsive; a slow/unloaded model can take longer on the first request (mitigated with a background warm-up and `keep_alive`, but not eliminated).
+- `backend/data/finance.json` and its routes (`finance_routes.py`, `geosmart_routes.py`) are earlier hackathon-era scaffolding, left connected but not used by the current frontend — the SQLite database is the real source of truth for everything wallet/credit/contacts-related.
+
+---
 
 ## Author
-**Vetriselvan Karunanithi**  
-GitHub: [vetrikarunanithi](https://github.com/vetrikarunanithi)  
-LinkedIn: [Vetriselvan Karunanithi](https://www.linkedin.com/in/vetriselvank)
+
+**Kamesh** — designed and built Finora end-to-end, including the backend (FastAPI, SQLite, authentication), the AI assistant, credit alerts, transaction PIN, face verification, and voice payment features described above.

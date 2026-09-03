@@ -8,6 +8,7 @@ from database import get_db
 from models.db_models import Contact, Transaction, User, Wallet
 from services.payment_service import execute_idempotent, to_amount
 from services.pin_service import verify_pin_or_raise
+from services.face_verification_service import validate_face_token
 from utils.deps import get_current_user
 
 router = APIRouter()
@@ -28,6 +29,7 @@ class PayRequest(BaseModel):
     pin: str
     idempotency_key: str
     channel: str = "voice"
+    face_token: str | None = None
 
 
 def _wallet_for(db: Session, user_id: int) -> Wallet:
@@ -133,6 +135,11 @@ def wallet_pay(
         )
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
+
+        # Voice payments require a genuine, backend-issued face-verification
+        # token (never a client-asserted boolean) before anything else runs.
+        if body.channel == "voice":
+            validate_face_token(user.id, body.face_token)
 
         # PIN verification and money movement happen atomically in the same
         # transaction — never "verify then trust a flag" from the client.

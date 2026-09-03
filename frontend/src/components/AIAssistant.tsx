@@ -31,6 +31,7 @@ import {
   generateRecommendations,
   forecastExpenses
 } from "../utils/aiAnalysis";
+import { sendChatMessage } from "../utils/aiAPI";
 
 interface Message {
   id: number;
@@ -41,6 +42,8 @@ interface Message {
   confidence?: number;
   entities?: any[];
   suggestions?: string[];
+  provider?: string;
+  isError?: boolean;
 }
 
 const contextManager = new ContextManager();
@@ -52,6 +55,8 @@ export function AIAssistant() {
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(true);
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const [lastFailedText, setLastFailedText] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const quickActions = [
@@ -523,7 +528,7 @@ export function AIAssistant() {
     return `I understand you're asking about: "${query}"\n\n🧠 Detected intent: ${intent.name.replace(/_/g, ' ')}\n📊 Confidence: ${Math.round(intent.confidence * 100)}%\n\n💡 I can help you with:\n\n📊 Spending Analysis & Tracking\n💰 Budget Management\n📈 Investment Planning\n🎯 Goal Tracking\n💳 Credit Score Tips\n🏦 Tax Planning\n🔍 Transaction Search\n🎮 Savings Challenges\n\n🔍 Try asking:\n• "How much did I spend on food?"\n• "What's my budget status?"\n• "Show unusual transactions"\n• "Recommend best investments"\n• "How to save tax?"`;
   };
 
-  const sendMessage = (text: string) => {
+  const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     const userMessage: Message = {
@@ -537,22 +542,38 @@ export function AIAssistant() {
     setInputValue('');
     setIsTyping(true);
     setShowQuickActions(false);
+    setLastFailedText(null);
 
-    // Analyze with NLP
-    setTimeout(() => {
-      const { text: aiText, suggestions } = generateAIResponse(text);
-      
+    try {
+      const response = await sendChatMessage(text, conversationId);
+      setConversationId(response.conversation_id);
+
       const aiMessage: Message = {
         id: messages.length + 2,
-        text: aiText,
+        text: response.text,
         sender: 'ai',
         timestamp: new Date(),
-        suggestions: suggestions
+        provider: response.provider,
       };
 
       setMessages(prev => [...prev, aiMessage]);
+    } catch (e) {
+      setLastFailedText(text);
+      const errorMessage: Message = {
+        id: messages.length + 2,
+        text: e instanceof Error ? e.message : "I'm unable to reach the AI service right now. Please try again.",
+        sender: 'ai',
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
+  };
+
+  const handleRetry = () => {
+    if (lastFailedText) sendMessage(lastFailedText);
   };
 
   const handleQuickAction = (query: string) => {
@@ -718,16 +739,36 @@ export function AIAssistant() {
                         className="p-3 rounded-xl"
                         style={message.sender === 'user'
                           ? { background: 'var(--ink)', color: '#fff' }
+                          : message.isError
+                          ? { background: 'color-mix(in oklab, var(--destructive) 10%, var(--card))', border: '1px solid var(--destructive)' }
                           : { background: 'var(--card)', border: '1px solid var(--border)' }}
                       >
                         <p className="text-sm whitespace-pre-line">{message.text}</p>
-                        <span className="text-xs opacity-70 mt-1 block">
-                          {message.timestamp.toLocaleTimeString('en-IN', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs opacity-70">
+                            {message.timestamp.toLocaleTimeString('en-IN', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          {message.provider && message.provider !== 'database' && message.provider !== 'no_context' && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                              {message.provider === 'gemini' ? 'Gemini' : message.provider === 'ollama' ? 'Ollama' : message.provider}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
+
+                      {message.isError && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRetry}
+                          className="mt-2 text-xs h-auto py-1 px-2 gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Retry
+                        </Button>
+                      )}
 
                       {/* Suggestions */}
                       {message.sender === 'ai' && message.suggestions && message.suggestions.length > 0 && (

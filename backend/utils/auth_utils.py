@@ -29,6 +29,14 @@ def create_refresh_token(data: dict):
     to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+def create_scoped_token(data: dict, token_type: str, expires_minutes: int):
+    """Short-lived, purpose-scoped token (e.g. a face-verification pass) —
+    distinct from the main access/refresh tokens so it can't be reused as one."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
+    to_encode.update({"exp": expire, "type": token_type})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 def decode_token(token: str, expected_type: str = "access"):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

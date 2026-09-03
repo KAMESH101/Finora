@@ -7,6 +7,7 @@ import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis';
 import { useCreditAlert } from '../contexts/CreditAlertContext';
 import { searchContacts, ApiContact } from '../utils/contactsAPI';
 import { parseVoiceIntent, payViaVoice, PayResult } from '../utils/voicePaymentAPI';
+import { verifyFace } from '../utils/faceAPI';
 import { syncWalletFromServer } from '../utils/walletManager';
 import { formatCurrency } from '../mockData';
 
@@ -14,6 +15,8 @@ type Step =
   | 'consent'
   | 'verifying_face'
   | 'face_verified'
+  | 'face_not_enrolled'
+  | 'face_mismatch'
   | 'listening'
   | 'parsing'
   | 'no_match'
@@ -35,6 +38,7 @@ export function VoicePaymentAssistant({ onClose }: { onClose: () => void }) {
   const [pinError, setPinError] = useState('');
   const [result, setResult] = useState<PayResult | null>(null);
   const [typedCommand, setTypedCommand] = useState('');
+  const [faceToken, setFaceToken] = useState<string | null>(null);
 
   const {
     start,
@@ -46,15 +50,40 @@ export function VoicePaymentAssistant({ onClose }: { onClose: () => void }) {
   const { speak } = useSpeechSynthesis();
   const { showBlocked } = useCreditAlert();
 
-  // STEP 1: simulated face verification (no live camera dependency, so a
-  // demo never breaks on camera/permission issues on presentation hardware)
+  // STEP 1: face verification — backend-authoritative (issues a real,
+  // short-lived, purpose-scoped token; no client-asserted boolean is
+  // trusted downstream). No live camera capture is required client-side,
+  // so a demo never breaks on camera/permission issues on presentation
+  // hardware — but the match/no-match decision and token come from the server.
   useEffect(() => {
     if (step !== 'verifying_face') return;
-    const t = setTimeout(() => {
-      setStep('face_verified');
-      speak('Face verified successfully.');
-    }, 1400);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await verifyFace();
+        if (cancelled) return;
+        if (!res.matched) {
+          if (res.reason === 'not_enrolled') {
+            setStep('face_not_enrolled');
+          } else {
+            setStep('face_mismatch');
+            speak('Face not matched. Please try again.');
+          }
+          return;
+        }
+        setFaceToken(res.token);
+        setStep('face_verified');
+        speak('Face verified successfully.');
+      } catch (e) {
+        if (cancelled) return;
+        setErrorText(e instanceof Error ? e.message : 'Unable to verify your identity right now.');
+        setStep('error');
+      }
+    }, 1200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [step]);
 
   useEffect(() => {
@@ -110,7 +139,7 @@ export function VoicePaymentAssistant({ onClose }: { onClose: () => void }) {
     setPinError('');
     setStep('processing');
     try {
-      const res = await payViaVoice({ contact_id: selectedContact.id, amount, pin });
+      const res = await payViaVoice({ contact_id: selectedContact.id, amount, pin, face_token: faceToken });
       setResult(res);
       setStep('success');
       syncWalletFromServer().catch(() => {});
@@ -167,6 +196,29 @@ export function VoicePaymentAssistant({ onClose }: { onClose: () => void }) {
             <>
               <CheckCircle2 className="w-12 h-12" style={{ color: 'var(--money-in)' }} />
               <p>Face verified successfully.</p>
+            </>
+          )}
+
+          {step === 'face_not_enrolled' && (
+            <>
+              <AlertCircle className="w-10 h-10 text-destructive" />
+              <p>You haven't enrolled face verification yet. Set it up in Settings → Security first.</p>
+              <Button variant="outline" onClick={onClose}>
+                Close
+              </Button>
+            </>
+          )}
+
+          {step === 'face_mismatch' && (
+            <>
+              <AlertCircle className="w-10 h-10 text-destructive" />
+              <p>Face not matched. Please try again.</p>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={onClose}>
+                  Close
+                </Button>
+                <Button onClick={() => setStep('verifying_face')}>Retry</Button>
+              </div>
             </>
           )}
 
