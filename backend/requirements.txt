@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic[email]
+PyJWT
+bcrypt
+python-dotenv
+sqlalchemy
+httpx
+scikit-learn
+numpy
+cryptography

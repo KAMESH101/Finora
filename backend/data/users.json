@@ -1,0 +1,20 @@
+[
+    {
+        "name": "KAMESH",
+        "email": "kameshrich005@gmail.com",
+        "mobile": "7200092556",
+        "password": "$2b$12$LSN/Mp2FbJHFIWYKHDML7unHzPR/J2E47VFB/exLUub2HdVLmOvd."
+    },
+    {
+        "name": "Test Judge",
+        "email": "testjudge@example.com",
+        "mobile": "9123456780",
+        "password": "$2b$12$AjtoLkwbqqblmmcnmC/sduiuwb8HPZBc6EU8I1oehA8ajisqbUQny"
+    },
+    {
+        "name": "Test User",
+        "email": "test@example.com",
+        "mobile": "9876543210",
+        "password": "$2b$12$wl9ZpYZ9MwKt1vflYoNK.ucvUXaX3Ldek0BPIwOLKjtqEOfgStFYG"
+    }
+]
